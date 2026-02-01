@@ -7,8 +7,8 @@ builder.Services.AddOpenApi();
 
 // 1. Configurar el Cliente de Cosmos DB (Copia y pega esto aquí)
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
-var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
-var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
+var dbName = builder.Configuration["CosmosDbSettings:DBcomputacion"];
+var containerName = builder.Configuration["CosmosDbSettings:Usuarios"];
 
 // Registramos el cliente para poder usarlo en los endpoints
 builder.Services.AddSingleton(s => new CosmosClient(connectionString));
