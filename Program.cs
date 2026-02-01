@@ -5,15 +5,14 @@ var builder = WebApplication.CreateBuilder(args);
 // --- 1. CONFIGURACIÓN DE SERVICIOS ---
 builder.Services.AddOpenApi();
 
-// Añadimos CORS para que tu Frontend (Static Web App) pueda conectarse
 builder.Services.AddCors(options => {
     options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
 
-// Leemos las etiquetas CORRECTAS del appsettings.json
+// Leemos las etiquetas de configuración
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
-var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"]; // ANTES DECÍA "DBcomputacion"
-var containerName = builder.Configuration["CosmosDbSettings:ContainerName"]; // ANTES DECÍA "Usuarios"
+var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
+var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
 
 // Registramos el cliente de Cosmos
 builder.Services.AddSingleton(s => new CosmosClient(connectionString));
@@ -21,22 +20,13 @@ builder.Services.AddSingleton(s => new CosmosClient(connectionString));
 var app = builder.Build();
 
 // --- 2. CONFIGURACIÓN DE LA APP ---
-app.UseCors(); // Activamos el permiso para el Frontend
+app.UseCors();
 app.MapOpenApi();
 app.UseHttpsRedirection();
 
-// Mensaje de bienvenida
 app.MapGet("/", () => "¡Backend conectado y listo!");
-/*
-// Endpoint para CREAR (POST)
-app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
-{
-    var container = client.GetContainer(dbName, containerName);
-    await container.CreateItemAsync(nuevoUsuario, new PartitionKey(nuevoUsuario.id));
-    return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
-});
-*/
 
+// --- Endpoint de DIAGNÓSTICO (Reemplaza al original) ---
 app.MapGet("/usuarios", async () =>
 {
     try
@@ -67,29 +57,17 @@ app.MapGet("/usuarios", async () =>
     }
     catch (Exception ex)
     {
-        // ANTES (Causaba la pantalla de error genérico):
-        // return Results.Problem($"ERROR REAL: {ex.Message} ... ");
-
-        // AHORA (Pon esto para forzar que salga el texto en pantalla):
+        // Forzamos el código 200 (OK) para que el navegador muestre el texto del error
         return Results.Ok($"🔴 ERROR DETECTADO: {ex.ToString()}");
     }
 });
-});
 
-// Endpoint para CONSULTAR (GET)
-app.MapGet("/usuarios", async (CosmosClient client) =>
+// Endpoint para CREAR (POST) - Lo mantengo activo para cuando arreglemos el GET
+app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
 {
     var container = client.GetContainer(dbName, containerName);
-    var query = new QueryDefinition("SELECT * FROM c");
-    var iterator = container.GetItemQueryIterator<Usuario>(query);
-    var resultados = new List<Usuario>();
-
-    while (iterator.HasMoreResults)
-    {
-        var response = await iterator.ReadNextAsync();
-        resultados.AddRange(response);
-    }
-    return Results.Ok(resultados);
+    await container.CreateItemAsync(nuevoUsuario, new PartitionKey(nuevoUsuario.id));
+    return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
 });
 
 app.Run();
