@@ -1,29 +1,42 @@
-using Microsoft.Azure.Cosmos; // IMPORTANTE: Asegúrate de que esta línea esté arriba
+using Microsoft.Azure.Cosmos;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- SECCIÓN DE SERVICIOS (Aquí agregas cosas al builder) ---
+// --- SERVICIOS ---
 builder.Services.AddOpenApi();
+builder.Services.AddCors(options => {
+    options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+});
 
-// 1. Configurar el Cliente de Cosmos DB (Copia y pega esto aquí)
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
-var dbName = builder.Configuration["CosmosDbSettings:DBcomputacion"];
-var containerName = builder.Configuration["CosmosDbSettings:Usuarios"];
+var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
+var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
 
-// Registramos el cliente para poder usarlo en los endpoints
 builder.Services.AddSingleton(s => new CosmosClient(connectionString));
 
 var app = builder.Build();
 
-// --- SECCIÓN DE CONFIGURACIÓN DE LA APP (Después del build) ---
-
-app.MapOpenApi(); 
+// --- MIDDLEWARE ---
+app.UseCors();
+app.MapOpenApi();
+app.UseHttpsRedirection();
 
 app.MapGet("/", () => "¡El Backend está funcionando correctamente y conectado a Cosmos DB!");
 
-app.UseHttpsRedirection();
+// ENDPOINT: LISTAR
+app.MapGet("/usuarios", async (CosmosClient client) =>
+{
+    var container = client.GetContainer(dbName, containerName);
+    var iterator = container.GetItemQueryIterator<Usuario>("SELECT * FROM c");
+    var resultados = new List<Usuario>();
+    while (iterator.HasMoreResults) {
+        var response = await iterator.ReadNextAsync();
+        resultados.AddRange(response);
+    }
+    return Results.Ok(resultados);
+});
 
-// Ejemplo de cómo guardar algo en Cosmos DB (puedes borrarlo luego si no lo usas)
+// ENDPOINT: CREAR
 app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
 {
     var container = client.GetContainer(dbName, containerName);
@@ -31,32 +44,6 @@ app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
     return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
 });
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
-
 app.Run();
 
-// --- TUS MODELOS/RECORDS (Al final del archivo) ---
-
-public record Usuario(string id, string nombre, string email);
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+public record Usuario(string id, string nombre);
