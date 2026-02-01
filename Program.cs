@@ -67,9 +67,13 @@ app.MapGet("/usuarios", async () =>
     }
     catch (Exception ex)
     {
-        // AQUÍ ESTÁ LA CLAVE: Devolvemos el error exacto al navegador
-        return Results.Problem($"ERROR REAL: {ex.Message} ||| TIPO: {ex.GetType().Name} ||| CAMINO: {ex.StackTrace}");
+        // ANTES (Causaba la pantalla de error genérico):
+        // return Results.Problem($"ERROR REAL: {ex.Message} ... ");
+
+        // AHORA (Pon esto para forzar que salga el texto en pantalla):
+        return Results.Ok($"🔴 ERROR DETECTADO: {ex.ToString()}");
     }
+});
 });
 
 // Endpoint para CONSULTAR (GET)
