@@ -2,41 +2,33 @@ using Microsoft.Azure.Cosmos;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- SERVICIOS ---
+// --- 1. CONFIGURACIÓN DE SERVICIOS ---
 builder.Services.AddOpenApi();
+
+// Añadimos CORS para que tu Frontend (Static Web App) pueda conectarse
 builder.Services.AddCors(options => {
     options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
 
+// Leemos las etiquetas CORRECTAS del appsettings.json
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
-var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
-var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
+var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"]; // ANTES DECÍA "DBcomputacion"
+var containerName = builder.Configuration["CosmosDbSettings:ContainerName"]; // ANTES DECÍA "Usuarios"
 
+// Registramos el cliente de Cosmos
 builder.Services.AddSingleton(s => new CosmosClient(connectionString));
 
 var app = builder.Build();
 
-// --- MIDDLEWARE ---
-app.UseCors();
+// --- 2. CONFIGURACIÓN DE LA APP ---
+app.UseCors(); // Activamos el permiso para el Frontend
 app.MapOpenApi();
 app.UseHttpsRedirection();
 
-app.MapGet("/", () => "¡El Backend está funcionando correctamente y conectado a Cosmos DB!");
+// Mensaje de bienvenida
+app.MapGet("/", () => "¡Backend conectado y listo!");
 
-// ENDPOINT: LISTAR
-app.MapGet("/usuarios", async (CosmosClient client) =>
-{
-    var container = client.GetContainer(dbName, containerName);
-    var iterator = container.GetItemQueryIterator<Usuario>("SELECT * FROM c");
-    var resultados = new List<Usuario>();
-    while (iterator.HasMoreResults) {
-        var response = await iterator.ReadNextAsync();
-        resultados.AddRange(response);
-    }
-    return Results.Ok(resultados);
-});
-
-// ENDPOINT: CREAR
+// Endpoint para CREAR (POST)
 app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
 {
     var container = client.GetContainer(dbName, containerName);
@@ -44,6 +36,23 @@ app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
     return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
 });
 
+// Endpoint para CONSULTAR (GET)
+app.MapGet("/usuarios", async (CosmosClient client) =>
+{
+    var container = client.GetContainer(dbName, containerName);
+    var query = new QueryDefinition("SELECT * FROM c");
+    var iterator = container.GetItemQueryIterator<Usuario>(query);
+    var resultados = new List<Usuario>();
+
+    while (iterator.HasMoreResults)
+    {
+        var response = await iterator.ReadNextAsync();
+        resultados.AddRange(response);
+    }
+    return Results.Ok(resultados);
+});
+
 app.Run();
 
+// Modelo de datos
 public record Usuario(string id, string nombre);
