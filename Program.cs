@@ -57,21 +57,12 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
     try
     {
         var tipoNormalizado = nuevaCarta.tipo?.Trim().ToLower();
-        var equipoNormalizado = nuevaCarta.equipo?.Trim().ToLower();
 
         if (tipoNormalizado != "arma" && tipoNormalizado != "jugador")
         {
             return Results.BadRequest(new
             {
                 mensaje = "El tipo solo puede ser 'arma' o 'jugador'."
-            });
-        }
-
-        if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
-        {
-            return Results.BadRequest(new
-            {
-                mensaje = "El equipo solo puede ser 'amantes' o 'botillo'."
             });
         }
 
@@ -89,6 +80,50 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
             {
                 mensaje = "La descripción es obligatoria."
             });
+        }
+
+        string? equipoFinal = null;
+        int? poderFinal = null;
+        string? armaFinal = null;
+        int? bonificadorFinal = null;
+
+        if (tipoNormalizado == "jugador")
+        {
+            var equipoNormalizado = nuevaCarta.equipo?.Trim().ToLower();
+
+            if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
+            {
+                return Results.BadRequest(new
+                {
+                    mensaje = "El equipo solo puede ser 'amantes' o 'botillo' cuando la carta es de tipo jugador."
+                });
+            }
+
+            var armasPermitidas = new[] { "Kette", "Stab", "Corredor", "Qtip", "Duales", "SNS", "Mandoble" };
+
+            if (string.IsNullOrWhiteSpace(nuevaCarta.arma) || !armasPermitidas.Contains(nuevaCarta.arma))
+            {
+                return Results.BadRequest(new
+                {
+                    mensaje = "El arma del jugador no es válida."
+                });
+            }
+
+            equipoFinal = equipoNormalizado;
+            poderFinal = nuevaCarta.poder;
+            armaFinal = nuevaCarta.arma;
+        }
+        else if (tipoNormalizado == "arma")
+        {
+            if (nuevaCarta.bonificador == null)
+            {
+                return Results.BadRequest(new
+                {
+                    mensaje = "La carta de tipo arma debe tener bonificador."
+                });
+            }
+
+            bonificadorFinal = nuevaCarta.bonificador;
         }
 
         var container = client.GetContainer(dbName, containerName);
@@ -117,8 +152,10 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
             siguienteId,
             tipoNormalizado,
             nuevaCarta.nombre.Trim(),
-            equipoNormalizado,
-            nuevaCarta.poder,
+            equipoFinal,
+            poderFinal,
+            armaFinal,
+            bonificadorFinal,
             nuevaCarta.descripcion.Trim()
         );
 
@@ -164,8 +201,10 @@ app.Run();
 public record CartaCrearRequest(
     string tipo,
     string nombre,
-    string equipo,
-    int poder,
+    string? equipo,
+    int? poder,
+    string? arma,
+    int? bonificador,
     string descripcion
 );
 
@@ -173,7 +212,9 @@ public record Carta(
     string id,
     string tipo,
     string nombre,
-    string equipo,
-    int poder,
+    string? equipo,
+    int? poder,
+    string? arma,
+    int? bonificador,
     string descripcion
 );
