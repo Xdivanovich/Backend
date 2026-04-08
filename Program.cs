@@ -70,6 +70,30 @@ app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
     return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
 });
 
+// Endpoint para Eliminar (POST)
+app.MapDelete("/usuarios/{id}", async (CosmosClient client, string id) =>
+{
+    try
+    {
+        var container = client.GetContainer(dbName, containerName);
+
+        await container.DeleteItemAsync<Usuario>(
+            id,
+            new PartitionKey(id)
+        );
+
+        return Results.Ok(new { mensaje = $"Usuario con id {id} eliminado correctamente." });
+    }
+    catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+        return Results.NotFound(new { mensaje = $"No existe un usuario con id {id}." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Error al eliminar: {ex.Message}");
+    }
+});
+
 app.Run();
 
 // Modelo de datos
