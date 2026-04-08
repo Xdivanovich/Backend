@@ -82,10 +82,13 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
             });
         }
 
+        var opcionesArma = new[] { "Kette", "Stab", "Corredor", "Qtip", "Duales", "SNS", "Mandoble" };
+
         string? equipoFinal = null;
         int? poderFinal = null;
         string? armaFinal = null;
         int? bonificadorFinal = null;
+        string? tipoArmaFinal = null;
 
         if (tipoNormalizado == "jugador")
         {
@@ -99,9 +102,7 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
                 });
             }
 
-            var armasPermitidas = new[] { "Kette", "Stab", "Corredor", "Qtip", "Duales", "SNS", "Mandoble" };
-
-            if (string.IsNullOrWhiteSpace(nuevaCarta.arma) || !armasPermitidas.Contains(nuevaCarta.arma))
+            if (string.IsNullOrWhiteSpace(nuevaCarta.arma) || !opcionesArma.Contains(nuevaCarta.arma))
             {
                 return Results.BadRequest(new
                 {
@@ -109,12 +110,28 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
                 });
             }
 
+            if (nuevaCarta.poder == null)
+            {
+                return Results.BadRequest(new
+                {
+                    mensaje = "La carta de tipo jugador debe tener poder."
+                });
+            }
+
             equipoFinal = equipoNormalizado;
             poderFinal = nuevaCarta.poder;
             armaFinal = nuevaCarta.arma;
         }
-        else if (tipoNormalizado == "arma")
+        else
         {
+            if (string.IsNullOrWhiteSpace(nuevaCarta.tipoArma) || !opcionesArma.Contains(nuevaCarta.tipoArma))
+            {
+                return Results.BadRequest(new
+                {
+                    mensaje = "El tipo del arma no es válido."
+                });
+            }
+
             if (nuevaCarta.bonificador == null)
             {
                 return Results.BadRequest(new
@@ -123,6 +140,7 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
                 });
             }
 
+            tipoArmaFinal = nuevaCarta.tipoArma;
             bonificadorFinal = nuevaCarta.bonificador;
         }
 
@@ -155,6 +173,7 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
             equipoFinal,
             poderFinal,
             armaFinal,
+            tipoArmaFinal,
             bonificadorFinal,
             nuevaCarta.descripcion.Trim()
         );
@@ -204,6 +223,7 @@ public record CartaCrearRequest(
     string? equipo,
     int? poder,
     string? arma,
+    string? tipoArma,
     int? bonificador,
     string descripcion
 );
@@ -215,6 +235,7 @@ public record Carta(
     string? equipo,
     int? poder,
     string? arma,
+    string? tipoArma,
     int? bonificador,
     string descripcion
 );
