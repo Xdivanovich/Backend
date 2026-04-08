@@ -4,17 +4,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // --- 1. CONFIGURACIÓN DE SERVICIOS ---
 builder.Services.AddOpenApi();
-
-builder.Services.AddCors(options => {
+builder.Services.AddCors(options =>
+{
     options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
 });
 
-// Leemos las etiquetas de configuración
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
 var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
 var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
 
-// Registramos el cliente de Cosmos
 builder.Services.AddSingleton(s => new CosmosClient(connectionString));
 
 var app = builder.Build();
@@ -26,75 +24,101 @@ app.UseHttpsRedirection();
 
 app.MapGet("/", () => "¡Backend conectado y listo!");
 
-// --- Endpoint de DIAGNÓSTICO (Reemplaza al original) ---
-app.MapGet("/usuarios", async () =>
+// GET /equipos
+app.MapGet("/equipos", async (CosmosClient client) =>
 {
     try
     {
-        // 1. Verificación manual de variables
-        if (string.IsNullOrEmpty(connectionString)) 
-            throw new Exception("La cadena de conexión (ConnectionStrings:CosmosDb) es NULL o vacía.");
-        if (string.IsNullOrEmpty(dbName)) 
-            throw new Exception("El nombre de la DB (CosmosDbSettings:DatabaseName) es NULL o vacío.");
-        if (string.IsNullOrEmpty(containerName)) 
-            throw new Exception("El nombre del contenedor (CosmosDbSettings:ContainerName) es NULL o vacío.");
+        var container = client.GetContainer(dbName, containerName);
 
-        // 2. Conexión Manual (para descartar fallos de inyección)
-        var debugClient = new CosmosClient(connectionString);
-        var container = debugClient.GetContainer(dbName, containerName);
-
-        // 3. Intento de lectura
         var query = new QueryDefinition("SELECT * FROM c");
-        var iterator = container.GetItemQueryIterator<Usuario>(query);
-        var resultados = new List<Usuario>();
+        var iterator = container.GetItemQueryIterator<Equipo>(query);
+
+        var resultados = new List<Equipo>();
 
         while (iterator.HasMoreResults)
         {
             var response = await iterator.ReadNextAsync();
             resultados.AddRange(response);
         }
-        return Results.Ok(resultados);
+
+        return Results.Ok(resultados.OrderByDescending(e => e.puntos));
     }
     catch (Exception ex)
     {
-        // Forzamos el código 200 (OK) para que el navegador muestre el texto del error
-        return Results.Ok($"🔴 ERROR DETECTADO: {ex.ToString()}");
+        return Results.Problem($"Error al obtener equipos: {ex.Message}");
     }
 });
 
-// Endpoint para CREAR (POST) - Lo mantengo activo para cuando arreglemos el GET
-app.MapPost("/usuarios", async (CosmosClient client, Usuario nuevoUsuario) =>
-{
-    var container = client.GetContainer(dbName, containerName);
-    await container.CreateItemAsync(nuevoUsuario, new PartitionKey(nuevoUsuario.id));
-    return Results.Created($"/usuarios/{nuevoUsuario.id}", nuevoUsuario);
-});
-
-// Endpoint para Eliminar (POST)
-app.MapDelete("/usuarios/{id}", async (CosmosClient client, string id) =>
+// POST /equipos
+app.MapPost("/equipos", async (CosmosClient client, EquipoCrearRequest nuevoEquipo) =>
 {
     try
     {
         var container = client.GetContainer(dbName, containerName);
 
-        await container.DeleteItemAsync<Usuario>(
-            id,
-            new PartitionKey(id)
+        var query = new QueryDefinition("SELECT c.id FROM c");
+        var iterator = container.GetItemQueryIterator<dynamic>(query);
+
+        int maxId = 0;
+
+        while (iterator.HasMoreResults)
+        {
+            var response = await iterator.ReadNextAsync();
+
+            foreach (var item in response)
+            {
+                if (int.TryParse((string)item.id, out int idNumerico) && idNumerico > maxId)
+                {
+                    maxId = idNumerico;
+                }
+            }
+        }
+
+        var siguienteId = (maxId + 1).ToString();
+
+        var equipo = new Equipo(
+            siguienteId,
+            nuevoEquipo.nombre,
+            nuevoEquipo.jugadores,
+            nuevoEquipo.puntos
         );
 
-        return Results.Ok(new { mensaje = $"Usuario con id {id} eliminado correctamente." });
-    }
-    catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-    {
-        return Results.NotFound(new { mensaje = $"No existe un usuario con id {id}." });
+        await container.CreateItemAsync(equipo, new PartitionKey(equipo.id));
+
+        return Results.Created($"/equipos/{equipo.id}", equipo);
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error al eliminar: {ex.Message}");
+        return Results.Problem($"Error al crear equipo: {ex.Message}");
+    }
+});
+
+// DELETE /equipos/{id}
+app.MapDelete("/equipos/{id}", async (CosmosClient client, string id) =>
+{
+    try
+    {
+        var container = client.GetContainer(dbName, containerName);
+
+        await container.DeleteItemAsync<Equipo>(id, new PartitionKey(id));
+
+        return Results.Ok(new { mensaje = $"Equipo {id} eliminado correctamente." });
+    }
+    catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+        return Results.NotFound(new { mensaje = $"No existe un equipo con id {id}." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Error al eliminar equipo: {ex.Message}");
     }
 });
 
 app.Run();
 
-// Modelo de datos
-public record Usuario(string id, string nombre);
+// Modelo para crear equipos desde el frontend
+public record EquipoCrearRequest(string nombre, List<string> jugadores, int puntos);
+
+// Modelo guardado en Cosmos
+public record Equipo(string id, string nombre, List<string> jugadores, int puntos);
