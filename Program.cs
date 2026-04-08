@@ -2,39 +2,40 @@ using Microsoft.Azure.Cosmos;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// --- 1. CONFIGURACIÓN DE SERVICIOS ---
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod());
 });
 
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
 var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
 var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
 
-builder.Services.AddSingleton(s => new CosmosClient(connectionString));
+builder.Services.AddSingleton(_ => new CosmosClient(connectionString));
 
 var app = builder.Build();
 
-// --- 2. CONFIGURACIÓN DE LA APP ---
 app.UseCors();
 app.MapOpenApi();
 app.UseHttpsRedirection();
 
-app.MapGet("/", () => "¡Backend conectado y listo!");
+app.MapGet("/", () => "¡Backend de cartas conectado y listo!");
 
-// GET /equipos
-app.MapGet("/equipos", async (CosmosClient client) =>
+// GET /cartas
+app.MapGet("/cartas", async (CosmosClient client) =>
 {
     try
     {
         var container = client.GetContainer(dbName, containerName);
 
         var query = new QueryDefinition("SELECT * FROM c");
-        var iterator = container.GetItemQueryIterator<Equipo>(query);
+        var iterator = container.GetItemQueryIterator<Carta>(query);
 
-        var resultados = new List<Equipo>();
+        var resultados = new List<Carta>();
 
         while (iterator.HasMoreResults)
         {
@@ -42,19 +43,54 @@ app.MapGet("/equipos", async (CosmosClient client) =>
             resultados.AddRange(response);
         }
 
-        return Results.Ok(resultados.OrderByDescending(e => e.puntos));
+        return Results.Ok(resultados.OrderBy(c => c.nombre));
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error al obtener equipos: {ex.Message}");
+        return Results.Problem($"Error al obtener cartas: {ex.Message}");
     }
 });
 
-// POST /equipos
-app.MapPost("/equipos", async (CosmosClient client, EquipoCrearRequest nuevoEquipo) =>
+// POST /cartas
+app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta) =>
 {
     try
     {
+        var tipoNormalizado = nuevaCarta.tipo?.Trim().ToLower();
+        var equipoNormalizado = nuevaCarta.equipo?.Trim().ToLower();
+
+        if (tipoNormalizado != "arma" && tipoNormalizado != "jugador")
+        {
+            return Results.BadRequest(new
+            {
+                mensaje = "El tipo solo puede ser 'arma' o 'jugador'."
+            });
+        }
+
+        if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
+        {
+            return Results.BadRequest(new
+            {
+                mensaje = "El equipo solo puede ser 'amantes' o 'botillo'."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(nuevaCarta.nombre))
+        {
+            return Results.BadRequest(new
+            {
+                mensaje = "El nombre es obligatorio."
+            });
+        }
+
+        if (string.IsNullOrWhiteSpace(nuevaCarta.descripcion))
+        {
+            return Results.BadRequest(new
+            {
+                mensaje = "La descripción es obligatoria."
+            });
+        }
+
         var container = client.GetContainer(dbName, containerName);
 
         var query = new QueryDefinition("SELECT c.id FROM c");
@@ -77,48 +113,67 @@ app.MapPost("/equipos", async (CosmosClient client, EquipoCrearRequest nuevoEqui
 
         var siguienteId = (maxId + 1).ToString();
 
-        var equipo = new Equipo(
+        var carta = new Carta(
             siguienteId,
-            nuevoEquipo.nombre,
-            nuevoEquipo.jugadores,
-            nuevoEquipo.puntos
+            tipoNormalizado,
+            nuevaCarta.nombre.Trim(),
+            equipoNormalizado,
+            nuevaCarta.poder,
+            nuevaCarta.descripcion.Trim()
         );
 
-        await container.CreateItemAsync(equipo, new PartitionKey(equipo.id));
+        await container.CreateItemAsync(carta, new PartitionKey(carta.id));
 
-        return Results.Created($"/equipos/{equipo.id}", equipo);
+        return Results.Created($"/cartas/{carta.id}", carta);
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error al crear equipo: {ex.Message}");
+        return Results.Problem($"Error al crear carta: {ex.Message}");
     }
 });
 
-// DELETE /equipos/{id}
-app.MapDelete("/equipos/{id}", async (CosmosClient client, string id) =>
+// DELETE /cartas/{id}
+app.MapDelete("/cartas/{id}", async (CosmosClient client, string id) =>
 {
     try
     {
         var container = client.GetContainer(dbName, containerName);
 
-        await container.DeleteItemAsync<Equipo>(id, new PartitionKey(id));
+        await container.DeleteItemAsync<Carta>(id, new PartitionKey(id));
 
-        return Results.Ok(new { mensaje = $"Equipo {id} eliminado correctamente." });
+        return Results.Ok(new
+        {
+            mensaje = $"Carta con id {id} eliminada correctamente."
+        });
     }
     catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
     {
-        return Results.NotFound(new { mensaje = $"No existe un equipo con id {id}." });
+        return Results.NotFound(new
+        {
+            mensaje = $"No existe una carta con id {id}."
+        });
     }
     catch (Exception ex)
     {
-        return Results.Problem($"Error al eliminar equipo: {ex.Message}");
+        return Results.Problem($"Error al eliminar carta: {ex.Message}");
     }
 });
 
 app.Run();
 
-// Modelo para crear equipos desde el frontend
-public record EquipoCrearRequest(string nombre, List<string> jugadores, int puntos);
+public record CartaCrearRequest(
+    string tipo,
+    string nombre,
+    string equipo,
+    int poder,
+    string descripcion
+);
 
-// Modelo guardado en Cosmos
-public record Equipo(string id, string nombre, List<string> jugadores, int puntos);
+public record Carta(
+    string id,
+    string tipo,
+    string nombre,
+    string equipo,
+    int poder,
+    string descripcion
+);
