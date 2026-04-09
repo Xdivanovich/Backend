@@ -175,7 +175,8 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
             armaFinal,
             tipoArmaFinal,
             bonificadorFinal,
-            nuevaCarta.descripcion.Trim()
+            nuevaCarta.descripcion.Trim(),
+            nuevaCarta.imagen
         );
 
         await container.CreateItemAsync(carta, new PartitionKey(carta.id));
@@ -225,7 +226,8 @@ public record CartaCrearRequest(
     string? arma,
     string? tipoArma,
     int? bonificador,
-    string descripcion
+    string descripcion,
+    string? imagen
 );
 
 public record Carta(
@@ -237,5 +239,6 @@ public record Carta(
     string? arma,
     string? tipoArma,
     int? bonificador,
-    string descripcion
+    string descripcion,
+    string? imagen
 );
