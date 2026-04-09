@@ -2,6 +2,7 @@ using Microsoft.Azure.Cosmos;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Activamos OpenAPI y CORS para que el frontend pueda llamar al backend
 builder.Services.AddOpenApi();
 builder.Services.AddCors(options =>
 {
@@ -11,10 +12,12 @@ builder.Services.AddCors(options =>
               .AllowAnyMethod());
 });
 
+// Leemos la configuración de Cosmos
 var connectionString = builder.Configuration.GetConnectionString("CosmosDb");
 var dbName = builder.Configuration["CosmosDbSettings:DatabaseName"];
 var containerName = builder.Configuration["CosmosDbSettings:ContainerName"];
 
+// Registramos el cliente de Cosmos como singleton
 builder.Services.AddSingleton(_ => new CosmosClient(connectionString));
 
 var app = builder.Build();
@@ -25,7 +28,10 @@ app.UseHttpsRedirection();
 
 app.MapGet("/", () => "¡Backend de cartas conectado y listo!");
 
+// ======================================================
 // GET /cartas
+// Devuelve todas las cartas guardadas
+// ======================================================
 app.MapGet("/cartas", async (CosmosClient client) =>
 {
     try
@@ -51,101 +57,46 @@ app.MapGet("/cartas", async (CosmosClient client) =>
     }
 });
 
+// ======================================================
+// GET /cartas/{id}
+// Devuelve una carta concreta por id
+// ======================================================
+app.MapGet("/cartas/{id}", async (CosmosClient client, string id) =>
+{
+    try
+    {
+        var container = client.GetContainer(dbName, containerName);
+        var response = await container.ReadItemAsync<Carta>(id, new PartitionKey(id));
+
+        return Results.Ok(response.Resource);
+    }
+    catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+        return Results.NotFound(new { mensaje = $"No existe una carta con id {id}." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Error al obtener la carta: {ex.Message}");
+    }
+});
+
+// ======================================================
 // POST /cartas
+// Crea una carta nueva
+// ======================================================
 app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta) =>
 {
     try
     {
-        var tipoNormalizado = nuevaCarta.tipo?.Trim().ToLower();
-
-        if (tipoNormalizado != "arma" && tipoNormalizado != "jugador")
+        var error = ValidarCarta(nuevaCarta);
+        if (error != null)
         {
-            return Results.BadRequest(new
-            {
-                mensaje = "El tipo solo puede ser 'arma' o 'jugador'."
-            });
-        }
-
-        if (string.IsNullOrWhiteSpace(nuevaCarta.nombre))
-        {
-            return Results.BadRequest(new
-            {
-                mensaje = "El nombre es obligatorio."
-            });
-        }
-
-        if (string.IsNullOrWhiteSpace(nuevaCarta.descripcion))
-        {
-            return Results.BadRequest(new
-            {
-                mensaje = "La descripción es obligatoria."
-            });
-        }
-
-        var opcionesArma = new[] { "Kette", "Stab", "Corredor", "Qtip", "Duales", "SNS", "Mandoble" };
-
-        string? equipoFinal = null;
-        int? poderFinal = null;
-        string? armaFinal = null;
-        int? bonificadorFinal = null;
-        string? tipoArmaFinal = null;
-
-        if (tipoNormalizado == "jugador")
-        {
-            var equipoNormalizado = nuevaCarta.equipo?.Trim().ToLower();
-
-            if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
-            {
-                return Results.BadRequest(new
-                {
-                    mensaje = "El equipo solo puede ser 'amantes' o 'botillo' cuando la carta es de tipo jugador."
-                });
-            }
-
-            if (string.IsNullOrWhiteSpace(nuevaCarta.arma) || !opcionesArma.Contains(nuevaCarta.arma))
-            {
-                return Results.BadRequest(new
-                {
-                    mensaje = "El arma del jugador no es válida."
-                });
-            }
-
-            if (nuevaCarta.poder == null)
-            {
-                return Results.BadRequest(new
-                {
-                    mensaje = "La carta de tipo jugador debe tener poder."
-                });
-            }
-
-            equipoFinal = equipoNormalizado;
-            poderFinal = nuevaCarta.poder;
-            armaFinal = nuevaCarta.arma;
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(nuevaCarta.tipoArma) || !opcionesArma.Contains(nuevaCarta.tipoArma))
-            {
-                return Results.BadRequest(new
-                {
-                    mensaje = "El tipo del arma no es válido."
-                });
-            }
-
-            if (nuevaCarta.bonificador == null)
-            {
-                return Results.BadRequest(new
-                {
-                    mensaje = "La carta de tipo arma debe tener bonificador."
-                });
-            }
-
-            tipoArmaFinal = nuevaCarta.tipoArma;
-            bonificadorFinal = nuevaCarta.bonificador;
+            return Results.BadRequest(new { mensaje = error });
         }
 
         var container = client.GetContainer(dbName, containerName);
 
+        // Buscamos el id numérico más alto para generar el siguiente
         var query = new QueryDefinition("SELECT c.id FROM c");
         var iterator = container.GetItemQueryIterator<dynamic>(query);
 
@@ -166,18 +117,7 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
 
         var siguienteId = (maxId + 1).ToString();
 
-        var carta = new Carta(
-            siguienteId,
-            tipoNormalizado,
-            nuevaCarta.nombre.Trim(),
-            equipoFinal,
-            poderFinal,
-            armaFinal,
-            tipoArmaFinal,
-            bonificadorFinal,
-            nuevaCarta.descripcion.Trim(),
-            nuevaCarta.imagen
-        );
+        var carta = ConstruirCarta(siguienteId, nuevaCarta);
 
         await container.CreateItemAsync(carta, new PartitionKey(carta.id));
 
@@ -189,7 +129,46 @@ app.MapPost("/cartas", async (CosmosClient client, CartaCrearRequest nuevaCarta)
     }
 });
 
+// ======================================================
+// PUT /cartas/{id}
+// Actualiza una carta existente
+// ======================================================
+app.MapPut("/cartas/{id}", async (CosmosClient client, string id, CartaCrearRequest cartaActualizada) =>
+{
+    try
+    {
+        var error = ValidarCarta(cartaActualizada);
+        if (error != null)
+        {
+            return Results.BadRequest(new { mensaje = error });
+        }
+
+        var container = client.GetContainer(dbName, containerName);
+
+        // Comprobamos que la carta exista antes de reemplazarla
+        await container.ReadItemAsync<Carta>(id, new PartitionKey(id));
+
+        var carta = ConstruirCarta(id, cartaActualizada);
+
+        // ReplaceItemAsync sustituye el documento completo
+        var response = await container.ReplaceItemAsync(carta, id, new PartitionKey(id));
+
+        return Results.Ok(response.Resource);
+    }
+    catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+        return Results.NotFound(new { mensaje = $"No existe una carta con id {id}." });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Error al actualizar carta: {ex.Message}");
+    }
+});
+
+// ======================================================
 // DELETE /cartas/{id}
+// Elimina una carta
+// ======================================================
 app.MapDelete("/cartas/{id}", async (CosmosClient client, string id) =>
 {
     try
@@ -218,6 +197,105 @@ app.MapDelete("/cartas/{id}", async (CosmosClient client, string id) =>
 
 app.Run();
 
+// ======================================================
+// FUNCIÓN DE VALIDACIÓN
+// Devuelve null si todo está bien
+// Devuelve un mensaje si hay error
+// ======================================================
+static string? ValidarCarta(CartaCrearRequest carta)
+{
+    var opcionesArma = new[] { "Kette", "Stab", "Corredor", "Qtip", "Duales", "SNS", "Mandoble" };
+    var tipoNormalizado = carta.tipo?.Trim().ToLower();
+
+    if (tipoNormalizado != "arma" && tipoNormalizado != "jugador")
+    {
+        return "El tipo solo puede ser 'arma' o 'jugador'.";
+    }
+
+    if (string.IsNullOrWhiteSpace(carta.nombre))
+    {
+        return "El nombre es obligatorio.";
+    }
+
+    if (string.IsNullOrWhiteSpace(carta.descripcion))
+    {
+        return "La descripción es obligatoria.";
+    }
+
+    if (tipoNormalizado == "jugador")
+    {
+        var equipoNormalizado = carta.equipo?.Trim().ToLower();
+
+        if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
+        {
+            return "El equipo solo puede ser 'amantes' o 'botillo' cuando la carta es de tipo jugador.";
+        }
+
+        if (string.IsNullOrWhiteSpace(carta.arma) || !opcionesArma.Contains(carta.arma))
+        {
+            return "El arma del jugador no es válida.";
+        }
+
+        if (carta.poder == null)
+        {
+            return "La carta de tipo jugador debe tener poder.";
+        }
+    }
+    else
+    {
+        if (string.IsNullOrWhiteSpace(carta.tipoArma) || !opcionesArma.Contains(carta.tipoArma))
+        {
+            return "El tipo del arma no es válido.";
+        }
+
+        if (carta.bonificador == null)
+        {
+            return "La carta de tipo arma debe tener bonificador.";
+        }
+    }
+
+    return null;
+}
+
+// ======================================================
+// FUNCIÓN QUE CONSTRUYE LA CARTA FINAL
+// Según el tipo, rellena unos campos y deja otros en null
+// ======================================================
+static Carta ConstruirCarta(string id, CartaCrearRequest datos)
+{
+    var tipoNormalizado = datos.tipo.Trim().ToLower();
+
+    if (tipoNormalizado == "jugador")
+    {
+        return new Carta(
+            id,
+            tipoNormalizado,
+            datos.nombre.Trim(),
+            datos.equipo!.Trim().ToLower(),
+            datos.poder,
+            datos.arma,
+            null,
+            null,
+            datos.descripcion.Trim(),
+            datos.imagen
+        );
+    }
+
+    return new Carta(
+        id,
+        tipoNormalizado,
+        datos.nombre.Trim(),
+        null,
+        null,
+        null,
+        datos.tipoArma,
+        datos.bonificador,
+        datos.descripcion.Trim(),
+        datos.imagen
+    );
+}
+
+// Modelo que llega desde el frontend
 public record CartaCrearRequest(
     string tipo,
     string nombre,
@@ -230,6 +308,7 @@ public record CartaCrearRequest(
     string? imagen
 );
 
+// Modelo final que se guarda en la base de datos
 public record Carta(
     string id,
     string tipo,
