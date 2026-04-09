@@ -226,11 +226,6 @@ static string? ValidarCarta(CartaCrearRequest carta)
     {
         var equipoNormalizado = carta.equipo?.Trim().ToLower();
 
-        if (equipoNormalizado != "amantes" && equipoNormalizado != "botillo")
-        {
-            return "El equipo solo puede ser 'amantes' o 'botillo' cuando la carta es de tipo jugador.";
-        }
-
         if (string.IsNullOrWhiteSpace(carta.arma) || !opcionesArma.Contains(carta.arma))
         {
             return "El arma del jugador no es válida.";
